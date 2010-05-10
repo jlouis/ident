@@ -19,7 +19,7 @@ var parseResponseTests = []parseResponseTest{
 
 func TestParseResponse(t *testing.T) {
 	for i, test := range parseResponseTests {
-		q, err := ParseResponse([]byte(test.query))
+		q, err := parseResponse([]byte(test.query))
 		if !test.error && err != nil {
 			t.Errorf("test %d: Unexpected error: %v", i, err)
 		}

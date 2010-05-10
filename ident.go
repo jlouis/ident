@@ -254,7 +254,7 @@ func parseType(l []byte, addInfo []byte) (*IdentResponse, os.Error) {
 	return r, nil
 }
 
-func ParseResponse(l []byte) (*IdentResponse, os.Error) {
+func parseResponse(l []byte) (*IdentResponse, os.Error) {
 	bs := bytes.SplitAfter(l, colon, 3)
 	if len(bs) < 3 {
 		goto Malformed
@@ -300,7 +300,7 @@ func Identify(hostname string, sPort int, cPort int) (*IdentResponse, os.Error) 
 		return nil, err2
 	}
 
-	return ParseResponse(response)
+	return parseResponse(response)
 }
 
 // vim: set ft=go noexpandtab sw=8 sts=8
