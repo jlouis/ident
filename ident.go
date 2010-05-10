@@ -53,7 +53,7 @@ func (e *badStringError) String() string {
 }
 
 func idString(sPort int, cPort int) (r []byte) {
-	return []byte((string(sPort) + ", " + string(cPort)))
+	return []byte((string(sPort) + "," + string(cPort)))
 }
 
 // Read a line of bytes (up to \n) from b.
