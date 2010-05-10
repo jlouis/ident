@@ -23,6 +23,8 @@ type ProtocolError struct {
 }
 
 type IdentResponse struct {
+	ServerPort      int
+	ClientPort      int
 	ResponseTy      string // The type of response, "ERROR", or "USERID"
 	Error           string // Is either an identd error message or ""
 	UserId          []byte // The Id of the user.
@@ -106,11 +108,12 @@ func parsePorts(l []byte) (int, int, os.Error) {
 	if len(bs) < 2 {
 		return 0, 0, &badStringError{"Could not parse ports", string(l)}
 	}
-	sPort, e1 := strconv.Atoi(strings.TrimSpace(string(bs[0])))
+	// TODO: These slice expresssions ought to be improved
+	sPort, e1 := strconv.Atoi(strings.TrimSpace(string(bs[0][0 : len(bs[0])-1])))
 	if e1 != nil {
 		return 0, 0, e1
 	}
-	dPort, e2 := strconv.Atoi(strings.TrimSpace(string(bs[1])))
+	dPort, e2 := strconv.Atoi(strings.TrimSpace(string(bs[1][0 : len(bs[1])-1])))
 	if e2 != nil {
 		return 0, 0, e2
 	}
@@ -190,7 +193,8 @@ func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) 
 
 	opsysCharset := bytes.SplitAfter(ais[0], comma, 0)
 	if len(opsysCharset) == 2 {
-		switch strings.TrimSpace(string(opsysCharset[1])) {
+		cs := string(opsysCharset[1][0 : len(opsysCharset[1])-1])
+		switch strings.TrimSpace(cs) {
 		case "ASCII-US":
 			r.Charset = "ASCII-US"
 		default:
@@ -199,7 +203,8 @@ func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) 
 	}
 
 	if len(opsysCharset) >= 1 {
-		switch strings.TrimSpace(string(opsysCharset[0])) {
+		os := string(opsysCharset[0][0 : len(opsysCharset[0])-1])
+		switch strings.TrimSpace(os) {
 		case "UNIX":
 			r.OperatingSystem = "UNIX"
 		case "OTHER":
@@ -232,7 +237,7 @@ func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) 
 // Parse the type and addInfo sections into an IdentResponse.
 func parseType(l []byte, addInfo []byte) (*IdentResponse, os.Error) {
 	r := new(IdentResponse)
-	s := strings.TrimSpace(string(l))
+	s := strings.TrimSpace(string(l[0 : len(l)-1]))
 	switch s {
 	case "USERID":
 		r.ResponseTy = "USERID"
@@ -249,25 +254,27 @@ func parseType(l []byte, addInfo []byte) (*IdentResponse, os.Error) {
 	return r, nil
 }
 
-func ParseResponse(l []byte) (int, int, *IdentResponse, os.Error) {
+func ParseResponse(l []byte) (*IdentResponse, os.Error) {
 	bs := bytes.SplitAfter(l, colon, 3)
 	if len(bs) < 3 {
 		goto Malformed
 	}
 	sPort, cPort, e := parsePorts(bs[0])
 	if e != nil {
-		return 0, 0, nil, e
+		return nil, e
 	}
 
-	respTy, e2 := parseType(bs[1], bs[2])
+	r, e2 := parseType(bs[1], bs[2])
 	if e2 != nil {
-		return 0, 0, nil, e2
+		return nil, e2
 	}
 
-	return sPort, cPort, respTy, nil
+	r.ServerPort = sPort
+	r.ClientPort = cPort
+	return r, nil
 
 Malformed:
-	return 0, 0, nil, &badStringError{"Malformed ident parse", string(l)}
+	return nil, &badStringError{"Malformed ident parse", string(l)}
 }
 
 // Make a connection to host asking for an iden on the server port sPort and client port cPort.
@@ -278,10 +285,10 @@ Malformed:
 //
 // The function returns the source port reflected on the server, the destination port reflected
 // on the server and an IdentResponse struct containing the ident information.
-func Identify(hostname string, sPort int, cPort int) (int, int, *IdentResponse, os.Error) {
+func Identify(hostname string, sPort int, cPort int) (*IdentResponse, os.Error) {
 	conn, err1 := net.Dial("tcp", "", hostname+":"+string(identPort))
 	if err1 != nil {
-		return 0, 0, nil, err1
+		return nil, err1
 	}
 	defer conn.Close()
 
@@ -290,7 +297,7 @@ func Identify(hostname string, sPort int, cPort int) (int, int, *IdentResponse, 
 	r := bufio.NewReader(conn)
 	response, err2 := readLineBytes(r)
 	if err2 != nil {
-		return 0, 0, nil, err2
+		return nil, err2
 	}
 
 	return ParseResponse(response)
