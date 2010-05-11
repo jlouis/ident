@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"fmt"
 	"net"
-	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ type ProtocolError struct {
 	os.ErrorString
 }
 
+// The response object of an ident request.
 type IdentResponse struct {
 	ServerPort      int
 	ClientPort      int
@@ -52,21 +52,17 @@ func (e *badStringError) String() string {
 	return fmt.Sprintf("%s %q", e.what, e.str)
 }
 
+// The string to send to the ident server
 func idString(sPort int, cPort int) (r []byte) {
 	return []byte((string(sPort) + "," + string(cPort)))
 }
 
-// Read a line of bytes (up to \n) from b.
+// Read a line of bytes (up to \r\n) from b.
 // Give up if the line exceeds maxLineLength.
 // The returned bytes are a pointer into storage in
 // the bufio, so they are only valid until the next bufio read.
 func readLineBytes(b *bufio.Reader) (p []byte, err os.Error) {
 	if p, err = b.ReadSlice('\n'); err != nil {
-		// We always know when EOF is coming.
-		// If the caller asked for a line, there should be a line.
-		if err == os.EOF {
-			err = io.ErrUnexpectedEOF
-		}
 		return nil, err
 	}
 	if len(p) >= maxLineLength {
@@ -80,7 +76,7 @@ func readLineBytes(b *bufio.Reader) (p []byte, err os.Error) {
 	// Chop off trailing white space.
 	var i int
 	for i = len(p); i > 0; i-- {
-		if c := p[i-1]; c != ' ' && c != '\r' && c != '\t' && c != '\n' {
+		if c := p[i-1]; c != '\r' && c != '\n' {
 			break
 		}
 	}
@@ -148,6 +144,7 @@ func allTokenChars(ai []byte) bool {
 	return true
 }
 
+// If the message is an ERROR message, parse the Additional info block of the Error
 func parseErrorAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) {
 	s := strings.TrimSpace(string(ai))
 	switch {
@@ -176,6 +173,7 @@ func parseErrorAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) {
 	return r, nil
 }
 
+// Predicate function: return true on a valid user id, false otherwise.
 func validUserId(userId []byte) bool {
 	if len(userId) > 512 {
 		return false
@@ -191,6 +189,7 @@ func validUserId(userId []byte) bool {
 	return true
 }
 
+// If the response type is USERID, parse the additional info block
 func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) {
 	ais := bytes.Split(ai, colon, 0)
 	if len(ais) < 2 {
@@ -261,6 +260,8 @@ func parseType(l []byte, ai []byte, r *IdentResponse) (*IdentResponse, os.Error)
 	return r, nil
 }
 
+// Response parser. Given a byte slice, it parses the slice for the RFC1413 protocol and then
+// fills the result into the IdentResponse object returned.
 func parseResponse(l []byte) (r *IdentResponse, e os.Error) {
 	r = new(IdentResponse)
 	// Parse Server Port
@@ -313,17 +314,45 @@ func Identify(hostname string, sPort int, cPort int) (*IdentResponse, os.Error) 
 		return nil, err1
 	}
 	defer conn.Close()
+	conn.SetTimeout(30000 * 1000000)
 
-	conn.Write(idString(sPort, cPort))
-	// TODO: 30 sec timeout
+	idS := idString(sPort, cPort)
+	if _, e := conn.Write(idS); e != nil {
+		return nil, e
+	}
+
 	r := bufio.NewReader(conn)
 	response, err2 := readLineBytes(r)
 	if err2 != nil {
 		return nil, err2
 	}
 
-	// TODO: Check that the send sPort and cPort are matching
-	return parseResponse(response)
+	resp, e := parseResponse(response)
+	if e != nil {
+		return nil, e
+	}
+
+	if resp.ServerPort != sPort || resp.ClientPort != cPort {
+		return nil, &badStringError{"Source and Client port mismatch", ""}
+	}
+
+	return resp, nil
+}
+
+// Query the ident server asynchronously, returns either the *IdentResponse object, or
+// simply 'nil' if there was some error.
+func Query(hostname string, sPort int, cPort int) (c chan *IdentResponse) {
+	c = make(chan *IdentResponse, 0)
+	go func() {
+		q, e := Identify(hostname, sPort, cPort)
+		if e != nil {
+			c <- nil
+		}
+
+		c <- q
+	}()
+
+	return c
 }
 
 // vim: set ft=go noexpandtab sw=8 sts=8
