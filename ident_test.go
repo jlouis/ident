@@ -13,17 +13,52 @@ type parseResponseTest struct {
 }
 
 var parseResponseTests = []parseResponseTest{
+	// Basic functionality
 	parseResponseTest{query: "6113,23:USERID:UNIX:joe", valid: true, error: false},
-	parseResponseTest{query: "00000,22:USERID:UNIX:joe", valid: true, error: false},
-	parseResponseTest{query: "0,23:USERID:UNIX:joe", valid: true, error: false},
-	parseResponseTest{query: "7890,22:USERID:OTHER:foo   ", valid: true, error: false},
-	// This next one is valid according to spec.
-	parseResponseTest{query: "80000,22:ERROR:INVALID-PORT", valid: false, error: false},
+	// Extreme ports
+	parseResponseTest{query: "00000,80000:USERID:UNIX:joe", valid: true, error: false},
+	// Invalid first port
 	parseResponseTest{query: "-1,22:USERID:UNIX:joe", valid: false, error: true},
-	parseResponseTest{query: "00000:22:USERID:UNIX:joe", valid: false, error: true},
-	parseResponseTest{query: "40000,65536:USERID:UNIX:joe", valid: true, error: false},
-	parseResponseTest{query: "40000,-234:USERID:UNIX:joe", valid: false, error: true},
-	parseResponseTest{query: "6113,23:ERROR:NO-USER", valid: false, error: false},
+	// Invalid second port
+	parseResponseTest{query: "7000,123456:USERID:UNIX:joe", valid: false, error: true},
+	// Whitespace in components
+	parseResponseTest{query: " 6113	 ,	 23 :USERID:UNIX:joe", valid: true, error: false},
+
+	// Invalid response type
+	parseResponseTest{query: " 6113	 ,	 23 :QUUX:UNIX:joe", valid: false, error: true},
+	// We do not allow lowercase
+	parseResponseTest{query: " 6113	 ,	 23 :userid:UNIX:joe", valid: false, error: true},
+
+	// ERROR INVALID-PORT
+	parseResponseTest{query: "80000,22:ERROR:INVALID-PORT", valid: false, error: false},
+	// ERROR NO-USER
+	parseResponseTest{query: "7000,22: ERROR	:	NO-USER   ", valid: false, error: false},
+	// ERROR HIDDEN-USER
+	parseResponseTest{query: "80000,22:ERROR:HIDDEN-USER", valid: false, error: false},
+	// ERROR UNKNOWN-ERROR
+	parseResponseTest{query: "80000,22:ERROR:UNKNOWN-ERROR", valid: false, error: false},
+
+	// Malformed ERROR Response
+	parseResponseTest{query: "80000,22:ERROR:Foobar", valid: false, error: true},
+
+	// Non-standard ERROR Response
+	parseResponseTest{query: "80000,22:ERROR:XMagicError[[[]]]", valid: false, error: false},
+
+	// Non-standard ERROR Response which is too long (65 chars, including 'X')
+	parseResponseTest{query: "80000,22:ERROR:X1234567891234567890123456789012345678901324567890123456789012345",
+		valid: false, error: true},
+
+	// USERID UNIX with CHARSET
+	parseResponseTest{query: "80000,22: USERID  :UNIX , US-ASCII:joe", valid: true, error: false},
+
+	/*
+		// This next one is valid according to spec.
+		parseResponseTest{query: "80000,22:ERROR:INVALID-PORT", valid: false, error: false},
+		parseResponseTest{query: "00000:22:USERID:UNIX:joe", valid: false, error: true},
+		parseResponseTest{query: "40000,65536:USERID:UNIX:joe", valid: true, error: false},
+		parseResponseTest{query: "40000,-234:USERID:UNIX:joe", valid: false, error: true},
+		parseResponseTest{query: "6113,23:ERROR:NO-USER", valid: false, error: false},
+	*/
 }
 
 func TestParseResponse(t *testing.T) {
