@@ -101,24 +101,30 @@ var (
 	comma = []byte{','}
 )
 
-// Parse the ports into their components. XXX: Fix if someone sends a malformed line with
-// ".....:". The slicing of [i+1:] ought to fail.
-func parsePorts(l []byte) (int, int, os.Error) {
-	bs := bytes.SplitAfter(l, comma, 2)
-	if len(bs) < 2 {
-		return 0, 0, &badStringError{"Could not parse ports", string(l)}
+// Parse a port-id component of the response. According to RFC1413 a valid port number is
+// one to five 'digit' characters. No kind of checking is made to make sure it is a TCP
+// port number. '99999' is a valid response as a result. We will check that the response
+// matches the query in another place.
+func parsePort(l []byte) (int, os.Error) {
+	for _, c := range l {
+		if (c >= '0' && c <= '9') || c == ' ' || c == '\t' {
+			continue
+		} else {
+			return 0, &badStringError{"Port value not all digits", string(l)}
+		}
 	}
-	// TODO: These slice expresssions ought to be improved
-	sPort, e1 := strconv.Atoi(strings.TrimSpace(string(bs[0][0 : len(bs[0])-1])))
-	if e1 != nil {
-		return 0, 0, e1
-	}
-	dPort, e2 := strconv.Atoi(strings.TrimSpace(string(bs[1][0 : len(bs[1])-1])))
-	if e2 != nil {
-		return 0, 0, e2
+	s := strings.TrimSpace(string(l))
+
+	if len(s) > 5 {
+		return 0, &badStringError{"Port value too long", string(l)}
 	}
 
-	return sPort, dPort, nil
+	p, e := strconv.Atoi(s)
+	if e != nil {
+		return 0, e
+	}
+
+	return p, nil
 }
 
 // Predicate function. Only allow valid tokens in Ident type 'X' responses
@@ -186,39 +192,40 @@ func validUserId(userId []byte) bool {
 }
 
 func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) {
-	ais := bytes.SplitAfter(ai, colon, 0)
+	ais := bytes.Split(ai, colon, 0)
 	if len(ais) < 2 {
 		return nil, &badStringError{"Could not split USERID response", string(ai)}
 	}
 
-	opsysCharset := bytes.SplitAfter(ais[0], comma, 0)
-	if len(opsysCharset) == 2 {
-		cs := string(opsysCharset[1][0 : len(opsysCharset[1])-1])
-		switch strings.TrimSpace(cs) {
+	osc := bytes.Split(ais[0], comma, 0)
+	if len(osc) == 2 {
+		cs := strings.TrimSpace(string(osc[1]))
+		switch cs {
 		case "ASCII-US":
 			r.Charset = "ASCII-US"
 		default:
-			return nil, &badStringError{"Unknown Character set", string(opsysCharset[1])}
+			return nil, &badStringError{"Unknown Character set", string(osc[1])}
 		}
 	}
 
-	if len(opsysCharset) >= 1 {
-		os := string(opsysCharset[0][0 : len(opsysCharset[0])-1])
-		switch strings.TrimSpace(os) {
+	if len(osc) >= 1 {
+		os := strings.TrimSpace(string(osc[0]))
+		switch os {
 		case "UNIX":
 			r.OperatingSystem = "UNIX"
 		case "OTHER":
 			r.OperatingSystem = "OTHER"
 		default:
-			if len(opsysCharset[0]) > 64 {
-				return nil, &badStringError{"Token characters too big", string(len(ai))}
+			if len(osc[0]) > 64 {
+				return nil, &badStringError{"Token characters too big",
+					string(len(ai))}
 			}
 
-			if !allTokenChars(opsysCharset[0]) {
+			if !allTokenChars(osc[0]) {
 				return nil, &badStringError{"Not all characters in token are valid", ""}
 			}
 
-			r.OperatingSystem = string(opsysCharset[0])
+			r.OperatingSystem = os
 		}
 	} else {
 		return nil, &badStringError{"Could not parse opsys-charset", string(ai)}
@@ -235,18 +242,17 @@ func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) 
 }
 
 // Parse the type and addInfo sections into an IdentResponse.
-func parseType(l []byte, addInfo []byte) (*IdentResponse, os.Error) {
-	r := new(IdentResponse)
-	s := strings.TrimSpace(string(l[0 : len(l)-1]))
+func parseType(l []byte, ai []byte, r *IdentResponse) (*IdentResponse, os.Error) {
+	s := strings.TrimSpace(string(l))
 	switch s {
 	case "USERID":
 		r.ResponseTy = "USERID"
 		r.Valid = true
-		return parseUserIdAddInfo(r, addInfo)
+		return parseUserIdAddInfo(r, ai)
 	case "ERROR":
 		r.ResponseTy = "ERROR"
 		r.Valid = false
-		return parseErrorAddInfo(r, addInfo)
+		return parseErrorAddInfo(r, ai)
 	default:
 		return nil, &badStringError{"Cannot parse response Type", s}
 	}
@@ -254,23 +260,38 @@ func parseType(l []byte, addInfo []byte) (*IdentResponse, os.Error) {
 	return r, nil
 }
 
-func parseResponse(l []byte) (*IdentResponse, os.Error) {
-	bs := bytes.SplitAfter(l, colon, 3)
-	if len(bs) < 3 {
+func parseResponse(l []byte) (r *IdentResponse, e os.Error) {
+	r = new(IdentResponse)
+	// Parse Server Port
+	bs := bytes.Split(l, comma, 2)
+	if len(bs) < 2 {
 		goto Malformed
 	}
-	sPort, cPort, e := parsePorts(bs[0])
+	r.ServerPort, e = parsePort(bs[0])
 	if e != nil {
 		return nil, e
 	}
 
-	r, e2 := parseType(bs[1], bs[2])
-	if e2 != nil {
-		return nil, e2
+	// Parse Client port
+	bs = bytes.Split(bs[1], colon, 2)
+	if len(bs) < 2 {
+		goto Malformed
+	}
+	r.ClientPort, e = parsePort(bs[0])
+	if e != nil {
+		return nil, e
 	}
 
-	r.ServerPort = sPort
-	r.ClientPort = cPort
+	// Parse response type
+	bs = bytes.Split(bs[1], colon, 2)
+	if len(bs) < 2 {
+		goto Malformed
+	}
+	r, e = parseType(bs[0], bs[1], r)
+	if e != nil {
+		return nil, e
+	}
+
 	return r, nil
 
 Malformed:
@@ -300,6 +321,7 @@ func Identify(hostname string, sPort int, cPort int) (*IdentResponse, os.Error) 
 		return nil, err2
 	}
 
+	// TODO: Check that the send sPort and cPort are matching
 	return parseResponse(response)
 }
 

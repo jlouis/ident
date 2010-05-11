@@ -14,13 +14,14 @@ type parseResponseTest struct {
 
 var parseResponseTests = []parseResponseTest{
 	parseResponseTest{query: "6113,23:USERID:UNIX:joe", valid: true, error: false},
+	parseResponseTest{query: "00000,22:USERID:UNIX:joe", valid: true, error: false},
 	parseResponseTest{query: "0,23:USERID:UNIX:joe", valid: true, error: false},
 	parseResponseTest{query: "7890,22:USERID:OTHER:foo   ", valid: true, error: false},
 	// This next one is valid according to spec.
 	parseResponseTest{query: "80000,22:ERROR:INVALID-PORT", valid: false, error: false},
 	parseResponseTest{query: "-1,22:USERID:UNIX:joe", valid: false, error: true},
-	parseResponseTest{query: "00000:22:USERID:UNIX:joe", valid: true, error: false},
-	parseResponseTest{query: "40000,65536:USERID:UNIX:joe", valid: false, error: true},
+	parseResponseTest{query: "00000:22:USERID:UNIX:joe", valid: false, error: true},
+	parseResponseTest{query: "40000,65536:USERID:UNIX:joe", valid: true, error: false},
 	parseResponseTest{query: "40000,-234:USERID:UNIX:joe", valid: false, error: true},
 	parseResponseTest{query: "6113,23:ERROR:NO-USER", valid: false, error: false},
 }
