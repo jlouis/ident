@@ -50,15 +50,14 @@ var parseResponseTests = []parseResponseTest{
 
 	// USERID UNIX with CHARSET
 	parseResponseTest{query: "80000,22: USERID  :UNIX , US-ASCII:joe", valid: true, error: false},
+	// USERID OTHER
+	parseResponseTest{query: "80000,22: USERID  :OTHER :joe", valid: true, error: false},
 
-	/*
-		// This next one is valid according to spec.
-		parseResponseTest{query: "80000,22:ERROR:INVALID-PORT", valid: false, error: false},
-		parseResponseTest{query: "00000:22:USERID:UNIX:joe", valid: false, error: true},
-		parseResponseTest{query: "40000,65536:USERID:UNIX:joe", valid: true, error: false},
-		parseResponseTest{query: "40000,-234:USERID:UNIX:joe", valid: false, error: true},
-		parseResponseTest{query: "6113,23:ERROR:NO-USER", valid: false, error: false},
-	*/
+	// USERID <token>
+	parseResponseTest{query: "80000,22: USERID  :OFFX:joe", valid: true, error: false},
+	parseResponseTest{query: "80000,22: USERID  :X1234567891234567890123456789012345678901324567890123456789012345:joe", valid: true, error: true},
+
+	// TODO: Check for too long userid ([512]byte)
 }
 
 func TestParseResponse(t *testing.T) {
