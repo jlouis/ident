@@ -201,20 +201,20 @@ func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) 
 	if len(osc) == 2 {
 		cs := strings.TrimSpace(string(osc[1]))
 		switch cs {
-		case "ASCII-US":
-			r.Charset = "ASCII-US"
+		case "US-ASCII":
+			break
 		default:
 			return nil, &badStringError{"Unknown Character set", string(osc[1])}
 		}
+
+		r.Charset = cs
 	}
 
 	if len(osc) >= 1 {
 		os := strings.TrimSpace(string(osc[0]))
 		switch os {
-		case "UNIX":
-			r.OperatingSystem = "UNIX"
-		case "OTHER":
-			r.OperatingSystem = "OTHER"
+		case "UNIX", "OTHER":
+			break
 		default:
 			if len(osc[0]) > 64 {
 				return nil, &badStringError{"Token characters too big",
@@ -225,8 +225,9 @@ func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) 
 				return nil, &badStringError{"Not all characters in token are valid", ""}
 			}
 
-			r.OperatingSystem = os
 		}
+
+		r.OperatingSystem = os
 	} else {
 		return nil, &badStringError{"Could not parse opsys-charset", string(ai)}
 	}
