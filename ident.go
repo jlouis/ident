@@ -75,8 +75,8 @@ func readLineBytes(b *bufio.Reader) (p []byte, err os.Error) {
 
 	// Chop off trailing CR
 	p = p[0 : len(p)-1]
-	if len(p) > 0 && p[len(p) - 1] == '\r' {
-		p = p[0 : len(p) - 1]
+	if len(p) > 0 && p[len(p)-1] == '\r' {
+		p = p[0 : len(p)-1]
 	}
 
 	return p, nil
