@@ -1,7 +1,5 @@
 package ident
 
-// TODO: Support the utf-8 charset
-
 import (
 	"bufio"
 	"bytes"
