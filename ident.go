@@ -1,11 +1,6 @@
 package ident
 
-// TODO:
-//   Many things needs some love
-//     ; Parsing could be better. Everything should be wrapped in an IdentResponse
-//     ; Timeouts are currently not handled.
-//     ; There is no system for parallel execution of ident requests. There ought to be.
-//
+// TODO: Support the utf-8 charset
 
 import (
 	"bufio"
@@ -21,16 +16,22 @@ type ProtocolError struct {
 	os.ErrorString
 }
 
+type Validity interface {
+	Valid() bool
+}
+
 // The response object of an ident request.
-type IdentResponse struct {
+type Response struct {
 	ServerPort      int
 	ClientPort      int
-	ResponseTy      string // The type of response, "ERROR", or "USERID"
 	Error           string // Is either an identd error message or ""
 	UserId          []byte // The Id of the user.
-	Valid           bool   // Convenience. True if the USERID was returned, false otherwise
 	OperatingSystem string // The Operating system entry
 	Charset         string // Character Set of the UserId
+}
+
+func (r Response) Valid() bool {
+	return (r.Error != "")
 }
 
 const (
@@ -73,14 +74,13 @@ func readLineBytes(b *bufio.Reader) (p []byte, err os.Error) {
 		return nil, ErrNoCR
 	}
 
-	// Chop off trailing white space.
-	var i int
-	for i = len(p); i > 0; i-- {
-		if c := p[i-1]; c != '\r' && c != '\n' {
-			break
-		}
+	// Chop off trailing CR
+	p = p[0 : len(p)-1]
+	if len(p) > 0 && p[len(p) - 1] == '\r' {
+		p = p[0 : len(p) - 1]
 	}
-	return p[0:i], nil
+
+	return p, nil
 }
 
 // readLineBytes, but convert the bytes into a string.
@@ -103,9 +103,7 @@ var (
 // matches the query in another place.
 func parsePort(l []byte) (int, os.Error) {
 	for _, c := range l {
-		if (c >= '0' && c <= '9') || c == ' ' || c == '\t' {
-			continue
-		} else {
+		if c != ' ' && c != '\t' && (c < '0' || c > '9') {
 			return 0, &badStringError{"Port value not all digits", string(l)}
 		}
 	}
@@ -145,29 +143,27 @@ func allTokenChars(ai []byte) bool {
 }
 
 // If the message is an ERROR message, parse the Additional info block of the Error
-func parseErrorAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) {
+func parseErrorAddInfo(r *Response, ai []byte) (*Response, os.Error) {
 	s := strings.TrimSpace(string(ai))
-	switch {
-	case s == "INVALID-PORT":
-		r.Error = "INVALID-PORT"
-	case s == "NO-USER":
-		r.Error = "NO-USER"
-	case s == "HIDDEN-USER":
-		r.Error = "HIDDEN-USER"
-	case s == "UNKNOWN-ERROR":
-		r.Error = "UNKNOWN-ERROR"
-	case ai[0] == 'X':
-		if len(ai) > 64 {
-			return nil, &badStringError{"Token characters too big", string(len(ai))}
-		}
-
-		if !allTokenChars(ai) {
-			return nil, &badStringError{"Not all characters in token are valid", s}
-		}
-
-		r.Error = string(ai)
+	switch s {
+	case "INVALID-PORT", "NO-USER", "HIDDEN-USER", "UNKNOWN-ERROR":
+		r.Error = s
 	default:
-		return nil, &badStringError{"Invalid ERROR message", s}
+		if ai[0] == 'X' {
+			if len(ai) > 64 {
+				return nil, &badStringError{"Token characters too big",
+					string(len(ai))}
+			}
+
+			if !allTokenChars(ai) {
+				return nil, &badStringError{
+					"Not all characters in token are valid", s}
+			}
+
+			r.Error = string(ai)
+		} else {
+			return nil, &badStringError{"Invalid ERROR message", s}
+		}
 	}
 
 	return r, nil
@@ -190,7 +186,7 @@ func validUserId(userId []byte) bool {
 }
 
 // If the response type is USERID, parse the additional info block
-func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) {
+func parseUserIdAddInfo(r *Response, ai []byte) (*Response, os.Error) {
 	ais := bytes.Split(ai, colon, 0)
 	if len(ais) < 2 {
 		return nil, &badStringError{"Could not split USERID response", string(ai)}
@@ -242,16 +238,12 @@ func parseUserIdAddInfo(r *IdentResponse, ai []byte) (*IdentResponse, os.Error) 
 }
 
 // Parse the type and addInfo sections into an IdentResponse.
-func parseType(l []byte, ai []byte, r *IdentResponse) (*IdentResponse, os.Error) {
+func parseType(l []byte, ai []byte, r *Response) (*Response, os.Error) {
 	s := strings.TrimSpace(string(l))
 	switch s {
 	case "USERID":
-		r.ResponseTy = "USERID"
-		r.Valid = true
 		return parseUserIdAddInfo(r, ai)
 	case "ERROR":
-		r.ResponseTy = "ERROR"
-		r.Valid = false
 		return parseErrorAddInfo(r, ai)
 	default:
 		return nil, &badStringError{"Cannot parse response Type", s}
@@ -262,8 +254,8 @@ func parseType(l []byte, ai []byte, r *IdentResponse) (*IdentResponse, os.Error)
 
 // Response parser. Given a byte slice, it parses the slice for the RFC1413 protocol and then
 // fills the result into the IdentResponse object returned.
-func parseResponse(l []byte) (r *IdentResponse, e os.Error) {
-	r = new(IdentResponse)
+func parseResponse(l []byte) (r *Response, e os.Error) {
+	r = new(Response)
 	// Parse Server Port
 	bs := bytes.Split(l, comma, 2)
 	if len(bs) < 2 {
@@ -308,7 +300,7 @@ Malformed:
 //
 // The function returns the source port reflected on the server, the destination port reflected
 // on the server and an IdentResponse struct containing the ident information.
-func Identify(hostname string, sPort int, cPort int) (*IdentResponse, os.Error) {
+func Query(hostname string, sPort int, cPort int) (*Response, os.Error) {
 	conn, err1 := net.Dial("tcp", "", hostname+":"+string(identPort))
 	if err1 != nil {
 		return nil, err1
@@ -337,22 +329,6 @@ func Identify(hostname string, sPort int, cPort int) (*IdentResponse, os.Error) 
 	}
 
 	return resp, nil
-}
-
-// Query the ident server asynchronously, returns either the *IdentResponse object, or
-// simply 'nil' if there was some error.
-func Query(hostname string, sPort int, cPort int) (c chan *IdentResponse) {
-	c = make(chan *IdentResponse, 0)
-	go func() {
-		q, e := Identify(hostname, sPort, cPort)
-		if e != nil {
-			c <- nil
-		}
-
-		c <- q
-	}()
-
-	return c
 }
 
 // vim: set ft=go noexpandtab sw=8 sts=8
