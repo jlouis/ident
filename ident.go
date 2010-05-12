@@ -25,9 +25,8 @@ type Response struct {
 	ServerPort      int
 	ClientPort      int
 	Error           string // Is either an identd error message or ""
-	UserId          []byte // The Id of the user.
+	UserId          string // The Id of the user.
 	OperatingSystem string // The Operating system entry
-	Charset         string // Character Set of the UserId
 }
 
 func (r Response) Valid() bool {
@@ -196,13 +195,11 @@ func parseUserIdAddInfo(r *Response, ai []byte) (*Response, os.Error) {
 	if len(osc) == 2 {
 		cs := strings.TrimSpace(string(osc[1]))
 		switch cs {
-		case "US-ASCII":
+		case "US-ASCII", "UTF-8", "utf-8":
 			break
 		default:
 			return nil, &badStringError{"Unknown Character set", string(osc[1])}
 		}
-
-		r.Charset = cs
 	}
 
 	if len(osc) >= 1 {
@@ -229,7 +226,7 @@ func parseUserIdAddInfo(r *Response, ai []byte) (*Response, os.Error) {
 
 	userId := ais[1]
 	if validUserId(userId) {
-		r.UserId = userId
+		r.UserId = string(userId)
 	} else {
 		return nil, &badStringError{"Invalid userid detected", ""}
 	}
