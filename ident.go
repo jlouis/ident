@@ -184,12 +184,12 @@ func validUserId(userId []byte) bool {
 
 // If the response type is USERID, parse the additional info block
 func parseUserIdAddInfo(r *Response, ai []byte) (*Response, os.Error) {
-	ais := bytes.Split(ai, colon, 0)
+	ais := bytes.Split(ai, colon, -1)
 	if len(ais) < 2 {
 		return nil, &badStringError{"Could not split USERID response", string(ai)}
 	}
 
-	osc := bytes.Split(ais[0], comma, 0)
+	osc := bytes.Split(ais[0], comma, -1)
 	if len(osc) == 2 {
 		cs := strings.TrimSpace(string(osc[1]))
 		switch cs {
