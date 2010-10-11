@@ -1,8 +1,7 @@
 *~
 *.swp
+*.6
 _obj
 _test
-_gotest_.6
-_go_.6
 6.out
-
+_testmain.go
