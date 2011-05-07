@@ -296,7 +296,7 @@ Malformed:
 // The function returns the source port reflected on the server, the destination port reflected
 // on the server and an IdentResponse struct containing the ident information.
 func Query(hostname string, sPort int, cPort int) (*Response, os.Error) {
-	conn, err1 := net.Dial("tcp", "", hostname+":"+string(identPort))
+	conn, err1 := net.Dial("tcp", hostname+":"+string(identPort))
 	if err1 != nil {
 		return nil, err1
 	}
