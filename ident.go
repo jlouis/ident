@@ -3,15 +3,16 @@ package ident
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ProtocolError struct {
-	os.ErrorString
+	Err error
 }
 
 type Validity interface {
@@ -37,8 +38,8 @@ const (
 )
 
 var (
-	ErrLineTooLong = &ProtocolError{"response line too long"}
-	ErrNoCR        = &ProtocolError{"no CR character found before LF"}
+	ErrLineTooLong = errors.New("response line too long")
+	ErrNoCR        = errors.New("no CR character found before LF")
 )
 
 type badStringError struct {
@@ -46,7 +47,7 @@ type badStringError struct {
 	str  string
 }
 
-func (e *badStringError) String() string {
+func (e *badStringError) Error() string {
 	return fmt.Sprintf("%s %q", e.what, e.str)
 }
 
@@ -59,7 +60,7 @@ func idString(sPort int, cPort int) (r []byte) {
 // Give up if the line exceeds maxLineLength.
 // The returned bytes are a pointer into storage in
 // the bufio, so they are only valid until the next bufio read.
-func readLineBytes(b *bufio.Reader) (p []byte, err os.Error) {
+func readLineBytes(b *bufio.Reader) (p []byte, err error) {
 	if p, err = b.ReadSlice('\n'); err != nil {
 		return nil, err
 	}
@@ -81,7 +82,7 @@ func readLineBytes(b *bufio.Reader) (p []byte, err os.Error) {
 }
 
 // readLineBytes, but convert the bytes into a string.
-func readLine(b *bufio.Reader) (s string, err os.Error) {
+func readLine(b *bufio.Reader) (s string, err error) {
 	p, e := readLineBytes(b)
 	if e != nil {
 		return "", e
@@ -98,7 +99,7 @@ var (
 // one to five 'digit' characters. No kind of checking is made to make sure it is a TCP
 // port number. '99999' is a valid response as a result. We will check that the response
 // matches the query in another place.
-func parsePort(l []byte) (int, os.Error) {
+func parsePort(l []byte) (int, error) {
 	for _, c := range l {
 		if c != ' ' && c != '\t' && (c < '0' || c > '9') {
 			return 0, &badStringError{"Port value not all digits", string(l)}
@@ -140,7 +141,7 @@ func allTokenChars(ai []byte) bool {
 }
 
 // If the message is an ERROR message, parse the Additional info block of the Error
-func parseErrorAddInfo(r *Response, ai []byte) (*Response, os.Error) {
+func parseErrorAddInfo(r *Response, ai []byte) (*Response, error) {
 	s := strings.TrimSpace(string(ai))
 	switch s {
 	case "INVALID-PORT", "NO-USER", "HIDDEN-USER", "UNKNOWN-ERROR":
@@ -183,13 +184,13 @@ func validUserId(userId []byte) bool {
 }
 
 // If the response type is USERID, parse the additional info block
-func parseUserIdAddInfo(r *Response, ai []byte) (*Response, os.Error) {
-	ais := bytes.Split(ai, colon, -1)
+func parseUserIdAddInfo(r *Response, ai []byte) (*Response, error) {
+	ais := bytes.Split(ai, colon)
 	if len(ais) < 2 {
 		return nil, &badStringError{"Could not split USERID response", string(ai)}
 	}
 
-	osc := bytes.Split(ais[0], comma, -1)
+	osc := bytes.Split(ais[0], comma)
 	if len(osc) == 2 {
 		cs := strings.TrimSpace(string(osc[1]))
 		switch cs {
@@ -233,7 +234,7 @@ func parseUserIdAddInfo(r *Response, ai []byte) (*Response, os.Error) {
 }
 
 // Parse the type and addInfo sections into an IdentResponse.
-func parseType(l []byte, ai []byte, r *Response) (*Response, os.Error) {
+func parseType(l []byte, ai []byte, r *Response) (*Response, error) {
 	s := strings.TrimSpace(string(l))
 	switch s {
 	case "USERID":
@@ -249,10 +250,10 @@ func parseType(l []byte, ai []byte, r *Response) (*Response, os.Error) {
 
 // Response parser. Given a byte slice, it parses the slice for the RFC1413 protocol and then
 // fills the result into the IdentResponse object returned.
-func parseResponse(l []byte) (r *Response, e os.Error) {
+func parseResponse(l []byte) (r *Response, e error) {
 	r = new(Response)
 	// Parse Server Port
-	bs := bytes.Split(l, comma, 2)
+	bs := bytes.SplitN(l, comma, 2)
 	if len(bs) < 2 {
 		goto Malformed
 	}
@@ -262,7 +263,7 @@ func parseResponse(l []byte) (r *Response, e os.Error) {
 	}
 
 	// Parse Client port
-	bs = bytes.Split(bs[1], colon, 2)
+	bs = bytes.SplitN(bs[1], colon, 2)
 	if len(bs) < 2 {
 		goto Malformed
 	}
@@ -272,7 +273,7 @@ func parseResponse(l []byte) (r *Response, e os.Error) {
 	}
 
 	// Parse response type
-	bs = bytes.Split(bs[1], colon, 2)
+	bs = bytes.SplitN(bs[1], colon, 2)
 	if len(bs) < 2 {
 		goto Malformed
 	}
@@ -295,20 +296,27 @@ Malformed:
 //
 // The function returns the source port reflected on the server, the destination port reflected
 // on the server and an IdentResponse struct containing the ident information.
-func Query(hostname string, sPort int, cPort int) (*Response, os.Error) {
+func Query(hostname string, sPort int, cPort int) (*Response, error) {
+
+	duration, err0 := time.ParseDuration("30s")
+	if err0 != nil {
+		return nil, err0
+	}
+
 	conn, err1 := net.Dial("tcp", hostname+":"+string(identPort))
 	if err1 != nil {
 		return nil, err1
 	}
 	defer conn.Close()
-	conn.SetTimeout(30000 * 1000000)
 
 	idS := idString(sPort, cPort)
+	conn.SetDeadline(time.Now().Add(duration))
 	if _, e := conn.Write(idS); e != nil {
 		return nil, e
 	}
 
 	r := bufio.NewReader(conn)
+	conn.SetDeadline(time.Now().Add(duration))
 	response, err2 := readLineBytes(r)
 	if err2 != nil {
 		return nil, err2
