@@ -69,7 +69,7 @@ func TestParseResponse(t *testing.T) {
 		if test.error && err == nil {
 			t.Errorf("test %d should have returned error", i)
 		}
-		if q != nil && q.Valid() == test.valid {
+		if q != nil && q.IsValid() == test.valid {
 			t.Errorf("test %d does not agree on validity", i)
 		}
 	}

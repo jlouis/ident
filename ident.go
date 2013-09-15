@@ -11,37 +11,43 @@ import (
 	"time"
 )
 
+// The Error type for an error in the protocol
 type ProtocolError struct {
 	Err error
 }
 
-type Validity interface {
-	Valid() bool
-}
-
-// The response object of an ident request.
+// Response is the structure of an ident response.
 type Response struct {
-	ServerPort      int
-	ClientPort      int
+	ServerPort      int    // Port of the server
+	ClientPort      int    // Port of the client
 	Error           string // Is either an identd error message or ""
 	UserId          string // The Id of the user.
 	OperatingSystem string // The Operating system entry
 }
 
-func (r Response) Valid() bool {
-	return (r.Error != "")
-}
-
 const (
-	maxLineLength = 1000 // assumed <= bufio.defaultBufSize
-	identPort     = 113
+	maxLineLength = 1000 // assumed ≤ bufio.defaultBufSize
+	identPort     = 113  // Default port for the ident server
 )
 
 var (
+	// Possible errors
 	ErrLineTooLong = errors.New("response line too long")
 	ErrNoCR        = errors.New("no CR character found before LF")
 )
 
+var (
+	// Notions of token symbols we want to split on
+	colon = []byte{':'}
+	comma = []byte{','}
+)
+
+// IsValid checks if the response is valid
+func (r Response) IsValid() bool {
+	return (r.Error != "")
+}
+
+// badStringError is an internal error type
 type badStringError struct {
 	what string
 	str  string
@@ -56,8 +62,8 @@ func idString(sPort int, cPort int) (r []byte) {
 	return []byte((string(sPort) + "," + string(cPort)))
 }
 
-// Read a line of bytes (up to \r\n) from b.
-// Give up if the line exceeds maxLineLength.
+// readLineBytes reads \r\n terminated lines from a Reader
+// gives up if the line exceeds maxLineLength.
 // The returned bytes are a pointer into storage in
 // the bufio, so they are only valid until the next bufio read.
 func readLineBytes(b *bufio.Reader) (p []byte, err error) {
@@ -81,7 +87,7 @@ func readLineBytes(b *bufio.Reader) (p []byte, err error) {
 	return p, nil
 }
 
-// readLineBytes, but convert the bytes into a string.
+// readLine is like readLineBytes, but converts the bytes into a string.
 func readLine(b *bufio.Reader) (s string, err error) {
 	p, e := readLineBytes(b)
 	if e != nil {
@@ -90,15 +96,11 @@ func readLine(b *bufio.Reader) (s string, err error) {
 	return string(p), nil
 }
 
-var (
-	colon = []byte{':'}
-	comma = []byte{','}
-)
-
-// Parse a port-id component of the response. According to RFC1413 a valid port number is
-// one to five 'digit' characters. No kind of checking is made to make sure it is a TCP
-// port number. '99999' is a valid response as a result. We will check that the response
-// matches the query in another place.
+// parsePort parses the port-id component of the response.
+// According to RFC1413 a valid port number is one to five 'digit' characters. 
+// No kind of checking is made to make sure it is a TCP port number. 
+// '99999' is a valid response as a result. We will check that the response matches the
+// query in another place.
 func parsePort(l []byte) (int, error) {
 	for _, c := range l {
 		if c != ' ' && c != '\t' && (c < '0' || c > '9') {
@@ -119,7 +121,7 @@ func parsePort(l []byte) (int, error) {
 	return p, nil
 }
 
-// Predicate function. Only allow valid tokens in Ident type 'X' responses
+// allTokenChars predicates if the input is valid tokens in Ident type 'X' responses
 func allTokenChars(ai []byte) bool {
 	ba := []byte("-, .:!@#$%^&*()_=+.,<>/?\"'~`{}[];")
 	for _, c := range ai {
@@ -140,7 +142,7 @@ func allTokenChars(ai []byte) bool {
 	return true
 }
 
-// If the message is an ERROR message, parse the Additional info block of the Error
+// parseErrorAddInfo parses ERROR messages and the additional info block
 func parseErrorAddInfo(r *Response, ai []byte) (*Response, error) {
 	s := strings.TrimSpace(string(ai))
 	switch s {
@@ -167,7 +169,7 @@ func parseErrorAddInfo(r *Response, ai []byte) (*Response, error) {
 	return r, nil
 }
 
-// Predicate function: return true on a valid user id, false otherwise.
+// validUserId is a predicate function for the valid user
 func validUserId(userId []byte) bool {
 	if len(userId) > 512 {
 		return false
@@ -183,7 +185,7 @@ func validUserId(userId []byte) bool {
 	return true
 }
 
-// If the response type is USERID, parse the additional info block
+// parseUserId parses the USERID portion, and additionally the info block
 func parseUserIdAddInfo(r *Response, ai []byte) (*Response, error) {
 	ais := bytes.Split(ai, colon)
 	if len(ais) < 2 {
@@ -233,7 +235,7 @@ func parseUserIdAddInfo(r *Response, ai []byte) (*Response, error) {
 	return r, nil
 }
 
-// Parse the type and addInfo sections into an IdentResponse.
+// parseType parses the type and the additional Info sections
 func parseType(l []byte, ai []byte, r *Response) (*Response, error) {
 	s := strings.TrimSpace(string(l))
 	switch s {
@@ -248,8 +250,7 @@ func parseType(l []byte, ai []byte, r *Response) (*Response, error) {
 	return r, nil
 }
 
-// Response parser. Given a byte slice, it parses the slice for the RFC1413 protocol and then
-// fills the result into the IdentResponse object returned.
+// parseResponse parses responses from byte sequences into Response objects
 func parseResponse(l []byte) (r *Response, e error) {
 	r = new(Response)
 	// Parse Server Port
@@ -288,6 +289,7 @@ Malformed:
 	return nil, &badStringError{"Malformed ident parse", string(l)}
 }
 
+// Query makes ident queries to foreign servers
 // Make a connection to host asking for an iden on the server port sPort and client port cPort.
 // For example, if we have a connection from host B to host A where B's port is 6113 and A's
 // port is 23 (A telnet connection from client B to server A), then the A host must ask B with
